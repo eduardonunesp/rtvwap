@@ -1,7 +1,6 @@
 package tradeproviders
 
 import (
-	"log"
 	"math/big"
 	"time"
 
@@ -11,7 +10,22 @@ import (
 )
 
 const (
+	// Websocket address to consume
 	wsURL = "wss://ws-feed.exchange.coinbase.com"
+
+	// Type of the subscription expected
+	typeSubscribe = "subscribe"
+
+	// Channel params expected on the WS subscription
+	channelParams = "matches"
+)
+
+var (
+	// Minor error, happens when a message from WS is a non expected message from channelParams
+	errNonExpectedMessage = errors.New("Non expected message")
+
+	// Max number of errors in row from the subscription
+	ErrCounterThreshold = 3
 )
 
 type (
@@ -43,64 +57,18 @@ type (
 		Price        string    `json:"price"`
 		Side         string    `json:"side"`
 	}
+
+	coinbaseProvider struct{}
 )
 
-type CoinbaseProvider struct{}
-
-func NewCoinbaseProvider() internals.TradeProviderInterface {
-	return CoinbaseProvider{}
+// NewCoinbaseProvider returns the TradeProvider from Coinbase
+func NewCoinbaseProvider() internals.TradeProviderCreator {
+	return coinbaseProvider{}
 }
 
-func newCoinbaseWS() (*websocket.Conn, error) {
-	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	return conn, nil
-}
-
-func subscribeToMatchChannel(wsConn *websocket.Conn, productID string) error {
-	return wsConn.WriteJSON(subReq{
-		Type:       "subscribe",
-		ProductIDs: []string{productID},
-		Channels:   []string{"matches"},
-	})
-}
-
-func checkSubscription(wsConn *websocket.Conn) error {
-	var subRes unsubSubRes
-	if err := wsConn.ReadJSON(&subRes); err != nil {
-		log.Fatal(err)
-	}
-
-	return nil
-}
-
-func matchResponse(wsConn *websocket.Conn) (string, *big.Float, *big.Float, error) {
-	mRes := matchRes{}
-	if err := wsConn.ReadJSON(&mRes); err != nil {
-		return "", nil, nil, err
-	}
-
-	log.Printf("ProductID: %s Size: %s Price: %s\n", mRes.ProductID, mRes.Size, mRes.Price)
-
-	price, _, err := big.NewFloat(0).Parse(mRes.Price, 10)
-	if err != nil {
-		return "", nil, nil, errors.Wrapf(err, "failed to parse price from string: %s", mRes.Price)
-	}
-
-	quantity, _, err := big.NewFloat(0).Parse(mRes.Size, 10)
-	if err != nil {
-		return "", nil, nil, errors.Wrapf(err, "failed to parse quantity from string: %s", mRes.Price)
-	}
-
-	return mRes.ProductID, price, quantity, nil
-}
-
-func (CoinbaseProvider) GetTradeProviderChan(pair internals.Pair) (internals.TradeProviderChan, error) {
-	tradeProvider := internals.TradeProviderChan{
-		Pair:      pair,
+// CreateTradeProvider will return the TradeProvider ready to use with a go channel ready to consume
+func (coinbaseProvider) CreateTradeProvider(pair internals.TradePair) (internals.TradeProvider, error) {
+	tradeProvider := internals.TradeProvider{
 		TradeChan: make(chan internals.Trade),
 	}
 
@@ -114,24 +82,32 @@ func (CoinbaseProvider) GetTradeProviderChan(pair internals.Pair) (internals.Tra
 	}
 
 	go func() {
+		defer close(tradeProvider.TradeChan)
+
+		var errCounter int
+
 		for {
-			productID, price, quantity, err := matchResponse(wsConn)
-			if err != nil {
-				// Maybe is a good idea to have a limit of failures before return as error
-				log.Println("warn: failed to match response", err)
+			price, quantity, err := matchResponse(wsConn)
+			if err != nil && errors.Is(err, errNonExpectedMessage) {
+				continue
+			} else if err != nil {
+				if errCounter >= ErrCounterThreshold {
+					break
+				}
+				continue
+			}
+			errCounter = 0
+
+			// Only accept with price and quantity ok
+			if price == nil && quantity == nil {
 				continue
 			}
 
-			// Just to make sure that we get the right pair
-			if productID != pair.Left+"-"+pair.Right {
-				log.Printf("warn: product %s id and pair do not match %s\n", productID, pair.Left+"-"+pair.Right)
-				continue
-			}
-
+			// New trade ready to push into go channel
 			newTrade := internals.Trade{
-				Pair:     pair,
-				Price:    price,
-				Quantity: quantity,
+				TradePair: pair,
+				Price:     price,
+				Quantity:  quantity,
 			}
 
 			tradeProvider.TradeChan <- newTrade
@@ -139,4 +115,57 @@ func (CoinbaseProvider) GetTradeProviderChan(pair internals.Pair) (internals.Tra
 	}()
 
 	return tradeProvider, nil
+}
+
+// Creates new Coinbase websocket
+func newCoinbaseWS() (*websocket.Conn, error) {
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return conn, nil
+}
+
+// Subscribes to the channel to get the match orders
+func subscribeToMatchChannel(wsConn *websocket.Conn, productID string) error {
+	return wsConn.WriteJSON(subReq{
+		Type:       typeSubscribe,
+		ProductIDs: []string{productID},
+		Channels:   []string{channelParams},
+	})
+}
+
+// Make sure that subscription is accepted
+func checkSubscription(wsConn *websocket.Conn) error {
+	var subRes unsubSubRes
+	if err := wsConn.ReadJSON(&subRes); err != nil {
+		return errors.Wrap(err, "failed on check coinbase subscription")
+	}
+
+	return nil
+}
+
+// Get the orders that matched/closed with the price and quantity
+func matchResponse(wsConn *websocket.Conn) (*big.Float, *big.Float, error) {
+	mRes := matchRes{}
+	if err := wsConn.ReadJSON(&mRes); err != nil {
+		return nil, nil, err
+	}
+
+	if mRes.Type != "match" {
+		return nil, nil, errNonExpectedMessage
+	}
+
+	price, _, err := big.NewFloat(0).Parse(mRes.Price, 10)
+	if err != nil {
+		return nil, nil, errors.Wrapf(err, "failed to parse price from string: %s", mRes.Price)
+	}
+
+	quantity, _, err := big.NewFloat(0).Parse(mRes.Size, 10)
+	if err != nil {
+		return nil, nil, errors.Wrapf(err, "failed to parse quantity from string: %s", mRes.Price)
+	}
+
+	return price, quantity, nil
 }
