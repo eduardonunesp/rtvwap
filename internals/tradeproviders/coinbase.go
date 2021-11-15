@@ -1,6 +1,7 @@
 package tradeproviders
 
 import (
+	"context"
 	"math/big"
 	"time"
 
@@ -58,16 +59,18 @@ type (
 		Side         string    `json:"side"`
 	}
 
-	coinbaseProvider struct{}
+	coinbaseProvider struct {
+		ctx context.Context
+	}
 )
 
 // NewCoinbaseProvider returns the TradeProvider from Coinbase
-func NewCoinbaseProvider() internals.TradeProviderCreator {
-	return coinbaseProvider{}
+func NewCoinbaseProvider(context context.Context) internals.TradeProviderCreator {
+	return coinbaseProvider{context}
 }
 
 // CreateTradeProvider will return the TradeProvider ready to use with a go channel ready to consume
-func (coinbaseProvider) CreateTradeProvider(pair internals.TradePair) (internals.TradeProvider, error) {
+func (c coinbaseProvider) CreateTradeProvider(pair internals.TradePair) (internals.TradeProvider, error) {
 	tradeProvider := internals.TradeProvider{
 		TradeChan: make(chan internals.Trade),
 	}
@@ -87,30 +90,38 @@ func (coinbaseProvider) CreateTradeProvider(pair internals.TradePair) (internals
 		var errCounter int
 
 		for {
-			price, quantity, err := matchResponse(wsConn)
-			if err != nil && errors.Is(err, errNonExpectedMessage) {
-				continue
-			} else if err != nil {
-				if errCounter >= ErrCounterThreshold {
-					break
+			select {
+			case <-c.ctx.Done():
+				close(tradeProvider.TradeChan)
+				wsConn.Close()
+				break
+			default:
+				price, quantity, err := matchResponse(wsConn)
+				if err != nil && errors.Is(err, errNonExpectedMessage) {
+					continue
+				} else if err != nil {
+					if errCounter >= ErrCounterThreshold {
+						break
+					}
+					continue
 				}
-				continue
-			}
-			errCounter = 0
+				errCounter = 0
 
-			// Only accept with price and quantity ok
-			if price == nil && quantity == nil {
-				continue
+				// Only accept with price and quantity ok
+				if price == nil && quantity == nil {
+					continue
+				}
+
+				// New trade ready to push into go channel
+				newTrade := internals.Trade{
+					TradePair: pair,
+					Price:     price,
+					Quantity:  quantity,
+				}
+
+				tradeProvider.TradeChan <- newTrade
 			}
 
-			// New trade ready to push into go channel
-			newTrade := internals.Trade{
-				TradePair: pair,
-				Price:     price,
-				Quantity:  quantity,
-			}
-
-			tradeProvider.TradeChan <- newTrade
 		}
 	}()
 

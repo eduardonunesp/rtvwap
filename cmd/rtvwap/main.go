@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	_ "net/http/pprof"
 	"os"
 	"os/signal"
+	"syscall"
 
 	"github.com/eduardonunesp/rtvwap/internals"
 	"github.com/eduardonunesp/rtvwap/internals/tradeproviders"
@@ -20,37 +22,44 @@ type tradePairs struct {
 func main() {
 	// interruption signal
 	sigInt := make(chan os.Signal, 1)
-	signal.Notify(sigInt, os.Interrupt)
+	signal.Notify(sigInt, syscall.SIGINT, syscall.SIGTERM)
+	ctx, cancel := context.WithCancel(context.Background())
+	vwapResultChan := make(chan internals.VWAPResult)
 
 	// Create trades
 	tradeFeeders := []tradePairs{
 		{
 			pair:     internals.NewTradePair("BTC", "USD"),
-			provider: tradeproviders.NewCoinbaseProvider(),
+			provider: tradeproviders.NewCoinbaseProvider(ctx),
 		},
 		{
 			pair:     internals.NewTradePair("ETH", "USD"),
-			provider: tradeproviders.NewCoinbaseProvider(),
+			provider: tradeproviders.NewCoinbaseProvider(ctx),
 		},
 		{
 			pair:     internals.NewTradePair("ETH", "BTC"),
-			provider: tradeproviders.NewCoinbaseProvider(),
+			provider: tradeproviders.NewCoinbaseProvider(ctx),
 		},
 	}
 
 	// Run calculation for each trade pair
 	for _, tradeFeed := range tradeFeeders {
-		tradeFeeder, err := internals.NewTradeFeedWithPair(tradeFeed.pair, tradeproviders.NewCoinbaseProvider())
+		tradeFeeder, err := internals.NewTradeFeedWithPair(tradeFeed.pair, tradeFeed.provider)
 		if err != nil {
 			log.Fatal(err)
 		}
 
-		internals.NewVWAP(tradeFeeder).Calculate()
+		internals.NewVWAP(ctx, tradeFeeder).Calculate(vwapResultChan)
 	}
 
-	select {
-	case <-sigInt:
-		fmt.Println(" SIGINT: Closing the program")
-		os.Exit(0)
+	for {
+		select {
+		case result := <-vwapResultChan:
+			log.Printf("VWAP RESULT %s %f\n", result.Pair.Left+"-"+result.Pair.Right, result.VWAPResult)
+		case <-sigInt:
+			cancel()
+			fmt.Println(" SIGINT: Closing the program")
+			os.Exit(0)
+		}
 	}
 }
