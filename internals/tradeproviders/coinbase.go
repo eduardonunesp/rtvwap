@@ -11,9 +11,6 @@ import (
 )
 
 const (
-	// Websocket address to consume
-	wsURL = "wss://ws-feed.exchange.coinbase.com"
-
 	// Type of the subscription expected
 	typeSubscribe = "subscribe"
 
@@ -22,6 +19,9 @@ const (
 )
 
 var (
+	// Websocket address to consume
+	wsURL = "wss://ws-feed.exchange.coinbase.com"
+
 	// Minor error, happens when a message from WS is a non expected message from channelParams
 	errNonExpectedMessage = errors.New("Non expected message")
 
