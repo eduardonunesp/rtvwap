@@ -1,16 +1,17 @@
 package internals
 
 import (
+	"log"
 	"math/big"
 )
 
-var PreAllocatedSize = 200
+// Max number of samples to calculate
 var QueueBufferSize = 200
 
 // VWAP represesnts the Volume-Weighted Average Price calculation
 type VWAP struct {
 	tradeChan             <-chan Trade
-	samplesChan           chan Trade
+	tradeSamples          []Trade
 	totalPriceAndQuantity *big.Float
 	totalQuantity         *big.Float
 }
@@ -18,28 +19,10 @@ type VWAP struct {
 // NewVWAP creates new Volume-Weighted Average Price from a TradeFeed
 func NewVWAP(tradeFeed TradeFeed) VWAP {
 	vwap := VWAP{
-		tradeFeed.TradeChan(),
-		make(chan Trade, QueueBufferSize),
-		new(big.Float),
-		new(big.Float),
+		tradeChan:             tradeFeed.TradeChan(),
+		totalPriceAndQuantity: new(big.Float),
+		totalQuantity:         new(big.Float),
 	}
-
-	// Pre allocate some blank values to accelarate calculations results
-	for i := 0; i < PreAllocatedSize; i++ {
-		vwap.samplesChan <- Trade{
-			TradePair: TradePair{"", ""},
-			Price:     new(big.Float),
-			Quantity:  new(big.Float),
-		}
-	}
-
-	// Run the calculation process on start
-	go func() {
-		// As new trade arrive should push into queueChan for VWAP calculation
-		for trade := range vwap.tradeChan {
-			vwap.samplesChan <- trade
-		}
-	}()
 
 	return vwap
 }
@@ -48,31 +31,36 @@ func (vwap VWAP) Calculate() {
 	go func() {
 		for {
 			select {
-			case trade := <-vwap.samplesChan:
-				_ = trade
-				// oldPrice, oldQuantity := vwap.queue.AddNew(trade)
+			case trade := <-vwap.tradeChan:
+				var prevTrade Trade
+				newTrade := trade
 
-				// mulNewPriceAndQuantity := NewEmptyBigFloat()
-				// mulNewPriceAndQuantity.Mul(trade.Price, trade.Quantity)
+				for len(vwap.tradeSamples) > 0 {
+					prevTrade = vwap.tradeSamples[0]
+					vwap.tradeSamples = vwap.tradeSamples[1:]
+				}
+				vwap.tradeSamples = append(vwap.tradeSamples, newTrade)
 
-				// if oldPrice != nil && oldQuantity != nil {
-				// 	mulOldPriceAndQuantity := NewEmptyBigFloat()
-				// 	mulOldPriceAndQuantity.Mul(oldPrice, oldQuantity)
+				mulNewPriceAndQuantity := new(big.Float)
+				mulNewPriceAndQuantity.Mul(newTrade.Price, newTrade.Quantity)
 
-				// 	vwap.totalPriceAndQuantity.Sub(vwap.totalPriceAndQuantity, mulOldPriceAndQuantity)
-				// 	vwap.totalPriceAndQuantity.Add(vwap.totalPriceAndQuantity, mulNewPriceAndQuantity)
+				if prevTrade.Price != nil && prevTrade.Quantity != nil {
+					mulOldPriceAndQuantity := new(big.Float)
+					mulOldPriceAndQuantity.Mul(prevTrade.Price, prevTrade.Quantity)
 
-				// 	vwap.totalQuantity.Sub(vwap.totalQuantity, oldQuantity).Add(vwap.totalQuantity, trade.Quantity)
+					vwap.totalPriceAndQuantity.Sub(vwap.totalPriceAndQuantity, mulOldPriceAndQuantity)
+					vwap.totalPriceAndQuantity.Add(vwap.totalPriceAndQuantity, mulNewPriceAndQuantity)
 
-				// } else {
-				// 	vwap.totalPriceAndQuantity.Add(vwap.totalPriceAndQuantity, mulNewPriceAndQuantity)
-				// 	vwap.totalQuantity.Add(vwap.totalQuantity, trade.Quantity)
-				// }
+					vwap.totalQuantity.Sub(vwap.totalQuantity, prevTrade.Quantity).Add(vwap.totalQuantity, newTrade.Quantity)
+				} else {
+					vwap.totalPriceAndQuantity.Add(vwap.totalPriceAndQuantity, mulNewPriceAndQuantity)
+					vwap.totalQuantity.Add(vwap.totalQuantity, newTrade.Quantity)
+				}
 
-				// vwapResult := NewEmptyBigFloat()
-				// vwapResult.Quo(vwapResult.totalPriceAndQuantity, vwapResult.totalQuantity)
+				vwapResult := new(big.Float)
+				vwapResult.Quo(vwap.totalPriceAndQuantity, vwap.totalQuantity)
 
-				// vwapResult.logger.Printf("VWAP for pair %s is %v", vc.pair, vwapResult)
+				log.Printf("VWAP for pair %s is %v", newTrade.Left+"-"+newTrade.Right, vwapResult)
 			}
 		}
 	}()
