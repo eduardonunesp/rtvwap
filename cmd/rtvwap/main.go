@@ -11,16 +11,19 @@ import (
 	"github.com/eduardonunesp/rtvwap/internals/tradeproviders"
 )
 
-type expectedTradeFeed struct {
+// Trade pairs to create
+type tradePairs struct {
 	pair     internals.TradePair
 	provider internals.TradeProviderCreator
 }
 
 func main() {
+	// interruption signal
 	sigInt := make(chan os.Signal, 1)
 	signal.Notify(sigInt, os.Interrupt)
 
-	tradeFeeders := []expectedTradeFeed{
+	// Create trades
+	tradeFeeders := []tradePairs{
 		{
 			pair:     internals.NewTradePair("BTC", "USD"),
 			provider: tradeproviders.NewCoinbaseProvider(),
@@ -35,15 +38,14 @@ func main() {
 		},
 	}
 
+	// Run calculation for each trade pair
 	for _, tradeFeed := range tradeFeeders {
 		tradeFeeder, err := internals.NewTradeFeedWithPair(tradeFeed.pair, tradeproviders.NewCoinbaseProvider())
 		if err != nil {
 			log.Fatal(err)
 		}
 
-		vwap := internals.NewVWAP(tradeFeeder)
-
-		vwap.Calculate()
+		internals.NewVWAP(tradeFeeder).Calculate()
 	}
 
 	select {
