@@ -36,8 +36,9 @@ different plataforms like coinmarketcap which incorporate about 200 exchanges as
 
 ## VWAP
 
-Finally the [`VWAP`](https://en.wikipedia.org/wiki/Volume-weighted_average_price) which is implemented as a consume of the `TradeFeed`, which does the calculation and 
-returns the data stream over the `chan VWAPResult` that can be used as the stream of real time data for WVAP results
+Finally the [`VWAP`](https://en.wikipedia.org/wiki/Volume-weighted_average_price) which is implemented as a consume of the `TradeFeed`, which does the calculation and returns the data stream over the `chan VWAPResult` that can be used as the stream of real time data for WVAP results
+
+> The VWAP calculating the sum of the latest 200 samples it can be updated by changing the var `internals.QueueBufferSize`
 
 ## Running 
 
