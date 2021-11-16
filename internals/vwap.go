@@ -16,9 +16,10 @@ type VWAP struct {
 	tradeSamples *list.List
 }
 
+// VWAPResult serves as a container for the result of a VWAP calculation
 type VWAPResult struct {
-	Pair       TradePair
-	VWAPResult *big.Float
+	Pair      TradePair
+	VWAPValue *big.Float
 }
 
 // NewVWAP creates new Volume-Weighted Average Price from a TradeFeed
@@ -32,15 +33,21 @@ func NewVWAP(ctx context.Context, tradeFeed TradeFeed) VWAP {
 	return vwap
 }
 
+// Calculate runs the VWAP calculation and send the resut to a chan of thep VWAP result
+// The VWAP has the realtime calculations
 func (vwap VWAP) Calculate(vwapResultChan chan<- VWAPResult) {
 	go func() {
 		for {
 			select {
 			case <-vwap.ctx.Done():
 				return
-			case trade := <-vwap.tradeChan:
+			case trade, ok := <-vwap.tradeChan:
+				if !ok {
+					return
+				}
 				vwap.tradeSamples.PushBack(trade)
 
+				// Keep max of queue buffer size or 200 samples
 				for vwap.tradeSamples.Len() > QueueBufferSize {
 					e := vwap.tradeSamples.Front()
 					vwap.tradeSamples.Remove(e)
@@ -57,10 +64,12 @@ func (vwap VWAP) Calculate(vwapResultChan chan<- VWAPResult) {
 					sumVolume = new(big.Float).Add(sumVolume, e.Value.(Trade).Quantity)
 				}
 
-				vwapResultChan <- VWAPResult{
-					Pair:       trade.TradePair,
-					VWAPResult: new(big.Float).Quo(sumPriceAndVolume, sumVolume),
+				result := VWAPResult{
+					Pair:      trade.TradePair,
+					VWAPValue: new(big.Float).Quo(sumPriceAndVolume, sumVolume),
 				}
+
+				vwapResultChan <- result
 			}
 		}
 	}()

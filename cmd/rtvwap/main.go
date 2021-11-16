@@ -3,8 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
-	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"syscall"
@@ -46,16 +44,18 @@ func main() {
 	for _, tradeFeed := range tradeFeeders {
 		tradeFeeder, err := internals.NewTradeFeedWithPair(tradeFeed.pair, tradeFeed.provider)
 		if err != nil {
-			log.Fatal(err)
+			fmt.Println(err)
+			os.Exit(1)
 		}
 
+		// Run the calculations for each for the current trade feeder
 		internals.NewVWAP(ctx, tradeFeeder).Calculate(vwapResultChan)
 	}
 
 	for {
 		select {
 		case result := <-vwapResultChan:
-			log.Printf("VWAP RESULT %s %f\n", result.Pair.Left+"-"+result.Pair.Right, result.VWAPResult)
+			fmt.Printf("VWAP RESULT %s %f\n", result.Pair.Left+"-"+result.Pair.Right, result.VWAPValue)
 		case <-sigInt:
 			cancel()
 			fmt.Println(" SIGINT: Closing the program")
