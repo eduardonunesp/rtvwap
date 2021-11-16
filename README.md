@@ -42,8 +42,10 @@ returns the data stream over the `chan VWAPResult` that can be used as the strea
 ## Running 
 
 ```bash
-go get -u https://github.com/eduardonunesp/rtvwap
+go get -u github.com/eduardonunesp/rtvwap/...
 ```
+
+> Should install into your GOPATH/bin the binary `rtvwap` 
 
 ## Testing
 
