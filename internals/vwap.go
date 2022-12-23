@@ -33,6 +33,10 @@ func NewVWAP(ctx context.Context, tradeFeed TradeFeed) VWAP {
 	return vwap
 }
 
+func CreateResultChan() chan VWAPResult {
+	return make(chan VWAPResult)
+}
+
 // Calculate runs the VWAP calculation and send the resut to a chan of thep VWAP result
 // The VWAP has the realtime calculations
 func (vwap VWAP) Calculate(vwapResultChan chan<- VWAPResult) {

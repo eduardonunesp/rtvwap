@@ -30,20 +30,10 @@ var (
 )
 
 type (
-	wsConn *websocket.Conn
-
 	subReq struct {
 		Type       string   `json:"type"`
 		ProductIDs []string `json:"product_ids"`
 		Channels   []string `json:"channels"`
-	}
-
-	unsubSubRes struct {
-		Type     string `json:"type"`
-		Channels []struct {
-			Type       string   `json:"type"`
-			ProductIDs []string `json:"product_ids"`
-		} `json:"channels"`
 	}
 
 	matchRes struct {
@@ -71,16 +61,14 @@ func NewCoinbaseProvider(context context.Context) internals.TradeProviderCreator
 
 // CreateTradeProvider will return the TradeProvider ready to use with a go channel ready to consume
 func (c coinbaseProvider) CreateTradeProvider(pair internals.TradePair) (internals.TradeProvider, error) {
-	tradeProvider := internals.TradeProvider{
-		TradeChan: make(chan internals.Trade),
-	}
+	tradeProvider := internals.NewTradeProvider()
 
 	wsConn, err := newCoinbaseWS()
 	if err != nil {
 		return tradeProvider, errors.Wrap(err, "failed to connect to coinbase websocket feed")
 	}
 
-	if err := subscribeToMatchChannel(wsConn, pair.Left+"-"+pair.Right); err != nil {
+	if err := subscribeToMatchChannel(wsConn, pair.From+"-"+pair.To); err != nil {
 		return tradeProvider, errors.Wrap(err, "failed to subscribe to coinbase websocket feed")
 	}
 
@@ -94,7 +82,6 @@ func (c coinbaseProvider) CreateTradeProvider(pair internals.TradePair) (interna
 			case <-c.ctx.Done():
 				close(tradeProvider.TradeChan)
 				wsConn.Close()
-				break
 			default:
 				price, quantity, err := matchResponse(wsConn)
 				if err != nil && errors.Is(err, errNonExpectedMessage) {
@@ -113,13 +100,7 @@ func (c coinbaseProvider) CreateTradeProvider(pair internals.TradePair) (interna
 				}
 
 				// New trade ready to push into go channel
-				newTrade := internals.Trade{
-					TradePair: pair,
-					Price:     price,
-					Quantity:  quantity,
-				}
-
-				tradeProvider.TradeChan <- newTrade
+				tradeProvider.TradeChan <- internals.NewTrade(pair, price, quantity)
 			}
 
 		}
@@ -145,16 +126,6 @@ func subscribeToMatchChannel(wsConn *websocket.Conn, productID string) error {
 		ProductIDs: []string{productID},
 		Channels:   []string{channelParams},
 	})
-}
-
-// Make sure that subscription is accepted
-func checkSubscription(wsConn *websocket.Conn) error {
-	var subRes unsubSubRes
-	if err := wsConn.ReadJSON(&subRes); err != nil {
-		return errors.Wrap(err, "failed on check coinbase subscription")
-	}
-
-	return nil
 }
 
 // Get the orders that matched/closed with the price and quantity

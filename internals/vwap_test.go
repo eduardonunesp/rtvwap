@@ -16,7 +16,7 @@ func TestVWAPCalc(t *testing.T) {
 	vwapResultChan := make(chan internals.VWAPResult)
 
 	// Testing with mock provider with few samples
-	tradeFeeder, err := internals.NewTradeFeedWithPair(internals.NewTradePair("BTC", "USD"), tradeproviders.NewMockProvider(ctx))
+	tradeFeeder, err := internals.NewTradeFeed(internals.NewTradePair("BTC", "USD"), tradeproviders.NewMockProvider(ctx))
 	assert.Nil(err)
 
 	internals.NewVWAP(ctx, tradeFeeder).Calculate(vwapResultChan)
