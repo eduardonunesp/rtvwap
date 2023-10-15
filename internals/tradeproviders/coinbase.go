@@ -22,11 +22,17 @@ var (
 	// Websocket address to consume
 	wsURL = "wss://ws-feed.exchange.coinbase.com"
 
+	// Max number of errors in row from the subscription
+	ErrCounterThreshold = 3
+
 	// Minor error, happens when a message from WS is a non expected message from channelParams
 	errNonExpectedMessage = errors.New("Non expected message")
 
-	// Max number of errors in row from the subscription
-	ErrCounterThreshold = 3
+	// Error when the websocket connection fails
+	errFailedToConnect = errors.New("Failed to connect to Coinbase websocket")
+
+	// Error when the subscription fails
+	errFailedToSubscribe = errors.New("Failed to subscribe to Coinbase websocket")
 )
 
 type (
@@ -55,40 +61,41 @@ type (
 )
 
 // NewCoinbaseProvider returns the TradeProvider from Coinbase
-func NewCoinbaseProvider(context context.Context) internals.TradeProviderCreator {
+func NewCoinbaseProvider(context context.Context) internals.TradeProvider {
 	return coinbaseProvider{context}
 }
 
 // CreateTradeProvider will return the TradeProvider ready to use with a go channel ready to consume
-func (c coinbaseProvider) CreateTradeProvider(pair internals.TradePair) (internals.TradeProvider, error) {
-	tradeProvider := internals.NewTradeProvider()
-
+func (c coinbaseProvider) GetTradeChannel(pair internals.TradePair) (internals.TradeChannel, error) {
 	wsConn, err := newCoinbaseWS()
 	if err != nil {
-		return tradeProvider, errors.Wrap(err, "failed to connect to coinbase websocket feed")
+		return nil, errFailedToConnect
 	}
 
-	if err := subscribeToMatchChannel(wsConn, pair.From+"-"+pair.To); err != nil {
-		return tradeProvider, errors.Wrap(err, "failed to subscribe to coinbase websocket feed")
+	if err := subscribeToMatchChannel(wsConn, pair.String()); err != nil {
+		return nil, errFailedToSubscribe
 	}
+
+	tradeChan := make(internals.TradeChannel)
 
 	go func() {
-		defer close(tradeProvider.TradeChan)
+		defer close(tradeChan)
+		defer wsConn.Close()
 
 		var errCounter int
 
+	outerloop:
 		for {
 			select {
 			case <-c.ctx.Done():
-				close(tradeProvider.TradeChan)
-				wsConn.Close()
+				break outerloop
 			default:
 				price, quantity, err := matchResponse(wsConn)
 				if err != nil && errors.Is(err, errNonExpectedMessage) {
 					continue
 				} else if err != nil {
 					if errCounter >= ErrCounterThreshold {
-						break
+						break outerloop
 					}
 					continue
 				}
@@ -100,13 +107,12 @@ func (c coinbaseProvider) CreateTradeProvider(pair internals.TradePair) (interna
 				}
 
 				// New trade ready to push into go channel
-				tradeProvider.TradeChan <- internals.NewTrade(pair, price, quantity)
+				tradeChan <- internals.NewTrade(pair, price, quantity)
 			}
-
 		}
 	}()
 
-	return tradeProvider, nil
+	return tradeChan, nil
 }
 
 // Creates new Coinbase websocket

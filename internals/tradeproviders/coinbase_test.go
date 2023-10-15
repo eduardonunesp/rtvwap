@@ -10,7 +10,7 @@ import (
 
 	"github.com/eduardonunesp/rtvwap/internals"
 	"github.com/gorilla/websocket"
-	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 var upgrader = websocket.Upgrader{}
@@ -34,7 +34,7 @@ func echo(w http.ResponseWriter, r *http.Request) {
 }
 
 func TestCreateProvider(t *testing.T) {
-	assert := assert.New(t)
+	require := require.New(t)
 
 	// Create test server with the echo handler.
 	s := httptest.NewServer(http.HandlerFunc(echo))
@@ -48,15 +48,15 @@ func TestCreateProvider(t *testing.T) {
 
 	var coinbaseProvider = NewCoinbaseProvider(ctx)
 	pair := internals.NewTradePair("BTC", "USD")
-	provider, err := coinbaseProvider.CreateTradeProvider(pair)
-	assert.Nil(err)
-	assert.NotNil(provider)
+	tradeChan, err := coinbaseProvider.GetTradeChannel(pair)
+	require.Nil(err)
+	require.NotNil(tradeChan)
 
 	go func() {
 		time.Sleep(1 * time.Second)
-		close(provider.TradeChan)
+		close(tradeChan)
 		cancel()
 	}()
 
-	<-provider.TradeChan
+	<-tradeChan
 }

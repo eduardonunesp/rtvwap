@@ -1,18 +1,11 @@
 package internals
 
 import (
+	"fmt"
 	"math/big"
 
 	"github.com/google/uuid"
 )
-
-// Trade represents a trade that matched/closed on the provider
-type Trade struct {
-	UUID uuid.UUID
-	TradePair
-	Price    *big.Float
-	Quantity *big.Float
-}
 
 func NewTrade(pair TradePair, price, quantity *big.Float) Trade {
 	return Trade{
@@ -21,4 +14,8 @@ func NewTrade(pair TradePair, price, quantity *big.Float) Trade {
 		Price:     price,
 		Quantity:  quantity,
 	}
+}
+
+func (t Trade) String() string {
+	return fmt.Sprintf("%s %s %s %s", t.UUID, t.TradePair, t.Price, t.Quantity)
 }

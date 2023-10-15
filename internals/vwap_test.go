@@ -7,19 +7,21 @@ import (
 
 	"github.com/eduardonunesp/rtvwap/internals"
 	"github.com/eduardonunesp/rtvwap/internals/tradeproviders"
-	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestVWAPCalc(t *testing.T) {
-	assert := assert.New(t)
+	require := require.New(t)
 	ctx := context.Background()
 	vwapResultChan := make(chan internals.VWAPResult)
 
 	// Testing with mock provider with few samples
-	tradeFeeder, err := internals.NewTradeFeed(internals.NewTradePair("BTC", "USD"), tradeproviders.NewMockProvider(ctx))
-	assert.Nil(err)
+	provider := tradeproviders.NewMockProvider(ctx)
+	tradeChan, err := provider.GetTradeChannel(internals.NewTradePair("BTC", "USD"))
+	require.NoError(err)
+	require.NotNil(tradeChan)
 
-	internals.NewVWAP(ctx, tradeFeeder).Calculate(vwapResultChan)
+	internals.NewVWAP(ctx, tradeChan).Calculate(vwapResultChan)
 
 	VWPALastResult := internals.VWAPResult{}
 	go func() {
@@ -30,6 +32,6 @@ func TestVWAPCalc(t *testing.T) {
 
 	time.Sleep(1 * time.Second)
 
-	assert.Equal(VWPALastResult.Pair, internals.NewTradePair("BTC", "USD"))
-	assert.Equal(VWPALastResult.VWAPValue.String(), "62246.8989")
+	require.Equal(VWPALastResult.Pair, internals.NewTradePair("BTC", "USD"))
+	require.Equal(VWPALastResult.VWAPValue.String(), "62246.8989")
 }

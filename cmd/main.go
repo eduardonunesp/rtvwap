@@ -14,7 +14,7 @@ import (
 // Trade group with pair and provider
 type tradeGroup struct {
 	pair     internals.TradePair
-	provider internals.TradeProviderCreator
+	provider internals.TradeProvider
 }
 
 func createSignalChannel() chan os.Signal {
@@ -23,9 +23,13 @@ func createSignalChannel() chan os.Signal {
 	return sigInt
 }
 
+func createResultChan() chan internals.VWAPResult {
+	return make(chan internals.VWAPResult)
+}
+
 func main() {
 	ctx, cancel := context.WithCancel(context.Background())
-	vwapResultChan := internals.CreateResultChan()
+	vwapResultChan := createResultChan()
 
 	// Create trade feeders
 	tradeGroups := []tradeGroup{
@@ -45,23 +49,23 @@ func main() {
 
 	// Run calculation for each trade pair
 	for _, tradeGroup := range tradeGroups {
-		tradeFeed, err := internals.NewTradeFeed(tradeGroup.pair, tradeGroup.provider)
+		tradeChan, err := tradeGroup.provider.GetTradeChannel(tradeGroup.pair)
 		if err != nil {
-			fmt.Println(err)
-			os.Exit(1)
+			panic(err)
 		}
 
 		// Run the calculations for each for the current trade feed
-		internals.NewVWAP(ctx, tradeFeed).Calculate(vwapResultChan)
+		internals.NewVWAP(ctx, tradeChan).Calculate(vwapResultChan)
 	}
 
 	for {
 		select {
 		case result := <-vwapResultChan:
-			fmt.Printf("VWAP RESULT %s %f\n", result.Pair.From+"-"+result.Pair.To, result.VWAPValue)
+			fmt.Printf("VWAP RESULT %s %f\n", result.Pair.String(), result.VWAPValue)
 		case <-createSignalChannel():
 			cancel()
 			fmt.Println(" SIGINT: Closing the program")
+			close(vwapResultChan)
 			os.Exit(0)
 		}
 	}

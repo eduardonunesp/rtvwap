@@ -27,21 +27,15 @@ type mockProvider struct {
 	errorTradeProvider error
 }
 
-func NewMockProvider(ctx context.Context) internals.TradeProviderCreator {
+func NewMockProvider(ctx context.Context) internals.TradeProvider {
 	return mockProvider{ctx, nil}
 }
 
-func (m mockProvider) CreateTradeProvider(pair internals.TradePair) (internals.TradeProvider, error) {
-	tradeProvider := internals.TradeProvider{
-		TradeChan: make(chan internals.Trade),
-	}
-
-	if m.errorTradeProvider != nil {
-		return tradeProvider, m.errorTradeProvider
-	}
+func (m mockProvider) GetTradeChannel(pair internals.TradePair) (internals.TradeChannel, error) {
+	tradeChan := make(internals.TradeChannel)
 
 	go func() {
-		defer close(tradeProvider.TradeChan)
+		defer close(tradeChan)
 
 		count := 0
 		loop := true
@@ -59,7 +53,7 @@ func (m mockProvider) CreateTradeProvider(pair internals.TradePair) (internals.T
 				count++
 
 				// New trade ready to push into go channel
-				tradeProvider.TradeChan <- newTrade
+				tradeChan <- newTrade
 
 				time.Sleep(100 * time.Millisecond)
 
@@ -71,5 +65,5 @@ func (m mockProvider) CreateTradeProvider(pair internals.TradePair) (internals.T
 		}
 	}()
 
-	return tradeProvider, nil
+	return tradeChan, nil
 }
